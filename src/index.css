@@ -117,6 +117,19 @@
     --sidebar-ring: oklch(0.556 0 0);
 }
 
+@media print {
+  body > * {
+    display: none !important;
+  }
+  .invoice-print-area {
+    display: block !important;
+  }
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
