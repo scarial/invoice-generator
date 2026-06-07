@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
-import { Mic, MicOff, ChevronDown, Send, Sparkles } from 'lucide-react'
-import { extractInvoiceFromText, type ExtractionResult } from '../../lib/invoiceExtractor'
+import { Mic, MicOff, ChevronDown, Send, Sparkles, RotateCcw } from 'lucide-react'
+import { extractInvoiceFromText, type ExtractionResult, type ChatMessage } from '../../lib/invoiceExtractor'
 import './AIAssistantBar.css'
 
 interface Props {
   onExtracted: (result: ExtractionResult) => void
+  invoiceKey?: string
 }
 
 // Extend window type for Web Speech API (not in lib.dom.d.ts)
@@ -36,7 +37,7 @@ const SpeechRecognitionAPI =
     ? window.SpeechRecognition || window.webkitSpeechRecognition
     : undefined
 
-export function AIAssistantBar({ onExtracted }: Props) {
+export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [text, setText] = useState('')
   const [transcript, setTranscript] = useState('')
@@ -44,9 +45,29 @@ export function AIAssistantBar({ onExtracted }: Props) {
   const [processing, setProcessing] = useState(false)
   const [warnings, setWarnings] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
 
   const [pendingResult, setPendingResult] = useState<ExtractionResult | null>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  // Reset when invoice changes
+  useEffect(() => {
+    setChatHistory([])
+    setWarnings([])
+    setError(null)
+    setPendingResult(null)
+  }, [invoiceKey])
+
+  // Auto-expand when conversation starts
+  useEffect(() => {
+    if (chatHistory.length > 0) setExpanded(true)
+  }, [chatHistory.length])
+
+  // Scroll to bottom when history grows
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatHistory.length, processing])
 
   useEffect(() => {
     return () => {
@@ -85,7 +106,6 @@ export function AIAssistantBar({ onExtracted }: Props) {
   const stopListening = () => {
     recognitionRef.current?.stop()
     setListening(false)
-    // Fallback: if speech ended before a final result, use last interim transcript
     setTranscript(t => {
       setText(prev => prev || t)
       return t
@@ -102,11 +122,11 @@ export function AIAssistantBar({ onExtracted }: Props) {
     setPendingResult(null)
 
     try {
-      const result = await extractInvoiceFromText(input)
+      const { result, updatedHistory } = await extractInvoiceFromText(input, chatHistory)
 
       if (result.confidence === 'low') {
-        // Store pending and show warnings — user must confirm
         setPendingResult(result)
+        setChatHistory(updatedHistory)
         const lowWarnings = ['Confiance faible — vérifiez les données avant de les appliquer.', ...result.warnings]
         if (result.tva !== null) lowWarnings.push(`TVA détectée (${result.tva}%) — à saisir manuellement.`)
         setWarnings(lowWarnings)
@@ -114,13 +134,12 @@ export function AIAssistantBar({ onExtracted }: Props) {
         return
       }
 
+      setChatHistory(updatedHistory)
       const allWarnings = [...result.warnings]
       if (result.tva !== null) {
         allWarnings.push(`TVA détectée (${result.tva}%) — à saisir manuellement dans le résumé.`)
       }
-      if (allWarnings.length > 0) {
-        setWarnings(allWarnings)
-      }
+      if (allWarnings.length > 0) setWarnings(allWarnings)
 
       onExtracted(result)
       setText('')
@@ -148,22 +167,54 @@ export function AIAssistantBar({ onExtracted }: Props) {
     }
   }
 
+  const handleReset = () => {
+    setChatHistory([])
+    setWarnings([])
+    setError(null)
+    setPendingResult(null)
+    setText('')
+    setTranscript('')
+  }
+
   const hasPending = pendingResult !== null
+  const userMessages = chatHistory.filter(m => m.role === 'user')
+  const hasHistory = userMessages.length > 0
 
   return (
     <div className={`ai-bar ${expanded ? 'ai-bar--expanded' : 'ai-bar--collapsed'}`}>
-      <div className="ai-bar__header" onClick={() => setExpanded(v => !v)}>
+      <button className="ai-bar__header" onClick={() => setExpanded(v => !v)} type="button">
         <Sparkles size={13} color="#94a3b8" />
-        <span className="ai-bar__label">Assistant IA — dicter ou écrire la facture</span>
+        <span className="ai-bar__label">
+          Assistant IA
+          {hasHistory && <span className="ai-bar__count">{userMessages.length}</span>}
+        </span>
         {processing && <div className="ai-bar__spinner" />}
         <ChevronDown
           size={14}
           className={`ai-bar__chevron ${expanded ? 'ai-bar__chevron--open' : ''}`}
         />
-      </div>
+      </button>
 
       {expanded && (
         <div className="ai-bar__body">
+          {hasHistory && (
+            <div className="ai-bar__history">
+              {userMessages.map((msg, i) => (
+                <div key={i} className="ai-bar__bubble">
+                  <span className="ai-bar__bubble-text">{msg.text}</span>
+                  <span className="ai-bar__bubble-check">✓</span>
+                </div>
+              ))}
+              {processing && (
+                <div className="ai-bar__bubble ai-bar__bubble--thinking">
+                  <div className="ai-bar__spinner" />
+                  <span>Analyse en cours…</span>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+          )}
+
           <div className="ai-bar__controls">
             {SpeechRecognitionAPI && (
               <button
@@ -172,11 +223,7 @@ export function AIAssistantBar({ onExtracted }: Props) {
                 title={listening ? 'Arrêter' : 'Dicter'}
                 type="button"
               >
-                {listening ? (
-                  <div className="ai-bar__pulse" />
-                ) : (
-                  <Mic size={14} color="#64748b" />
-                )}
+                {listening ? <div className="ai-bar__pulse" /> : <Mic size={14} color="#64748b" />}
               </button>
             )}
             {!SpeechRecognitionAPI && (
@@ -186,7 +233,7 @@ export function AIAssistantBar({ onExtracted }: Props) {
             )}
             <input
               className="ai-bar__input"
-              placeholder="Décrivez la facture en langage naturel…"
+              placeholder={hasHistory ? 'Précisez ou ajoutez…' : 'Décrivez la facture en langage naturel…'}
               value={text}
               onChange={e => {
                 setText(e.target.value)
@@ -203,6 +250,16 @@ export function AIAssistantBar({ onExtracted }: Props) {
             >
               {hasPending ? 'Confirmer' : <Send size={13} />}
             </button>
+            {hasHistory && (
+              <button
+                className="ai-bar__reset"
+                onClick={handleReset}
+                title="Réinitialiser la conversation"
+                type="button"
+              >
+                <RotateCcw size={13} />
+              </button>
+            )}
           </div>
 
           {transcript && !text && (
