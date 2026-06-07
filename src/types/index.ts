@@ -18,7 +18,7 @@ export interface Client {
   email: string
 }
 
-export type Frequence = 'mensuel' | 'annuel'
+export type Frequence = 'mensuel' | 'annuel' | 'unique'
 export type InvoiceType = 'facture' | 'avoir'
 
 export interface InvoiceLine {

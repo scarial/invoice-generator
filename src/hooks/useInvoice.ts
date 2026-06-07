@@ -31,9 +31,7 @@ export function useInvoice() {
   // F1 fix: init numero via useEffect, not during render
   useEffect(() => {
     if (!invoice.numero) {
-      const next = counter + 1
-      setCounter(next)
-      setInvoice(prev => ({ ...prev, numero: formatInvoiceNumber(next, new Date().getFullYear()) }))
+      setInvoice(prev => ({ ...prev, numero: generateNextNumber() }))
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -66,6 +64,10 @@ export function useInvoice() {
     setInvoice(prev => ({ ...prev, lignes: [...prev.lignes, line] }))
   }
 
+  const addLineFrom = (line: InvoiceLine) => {
+    setInvoice(prev => ({ ...prev, lignes: [...prev.lignes, line] }))
+  }
+
   const updateLine = (id: string, data: Partial<InvoiceLine>) => {
     setInvoice(prev => ({
       ...prev,
@@ -83,5 +85,5 @@ export function useInvoice() {
     return sum + q * p
   }, 0)
 
-  return { invoice, updateInvoice, initInvoice, addLine, updateLine, removeLine, totalHT }
+  return { invoice, updateInvoice, initInvoice, addLine, addLineFrom, updateLine, removeLine, totalHT }
 }

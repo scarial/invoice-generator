@@ -8,11 +8,13 @@ import { ClientSection } from '../components/invoice/sections/ClientSection'
 import { InvoiceMetaSection } from '../components/invoice/sections/InvoiceMetaSection'
 import { ServiceLinesSection } from '../components/invoice/sections/ServiceLinesSection'
 import { SummarySection } from '../components/invoice/sections/SummarySection'
+import { AIAssistantBar } from '../components/ai/AIAssistantBar'
 import { useUserInfo } from '../hooks/useUserInfo'
 import { useClients } from '../hooks/useClients'
 import { useInvoice } from '../hooks/useInvoice'
 import { findMatchingClient } from '../utils/clients'
-import type { Client, Invoice } from '../types'
+import type { Client, Invoice, InvoiceLine } from '../types'
+import type { ExtractionResult } from '../lib/invoiceExtractor'
 
 interface Props {
   preloadedClient?: Omit<Client, 'id'> | null
@@ -21,16 +23,23 @@ interface Props {
 export function InvoiceEditor({ preloadedClient }: Props) {
   const { userInfo, updateUserInfo } = useUserInfo()
   const { clients, addClient, updateClient } = useClients()
-  const { invoice, updateInvoice, initInvoice, addLine, updateLine, removeLine, totalHT } = useInvoice()
+  const { invoice, updateInvoice, initInvoice, addLine, addLineFrom, updateLine, removeLine, totalHT } = useInvoice()
   const previewRef = useRef<HTMLDivElement>(null)
+  const fillTimersRef = useRef<ReturnType<typeof setTimeout>[]>([])
 
   // F2 fix: sync preloadedClient into invoice state immediately so there is one source of truth
   useEffect(() => {
-    if (preloadedClient !== undefined && preloadedClient !== null) {
+    if (preloadedClient != null) {
       updateInvoice({ client: preloadedClient })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preloadedClient])
+
+  useEffect(() => {
+    return () => {
+      fillTimersRef.current.forEach(clearTimeout)
+    }
+  }, [])
 
   const handlePrint = useReactToPrint({ contentRef: previewRef, documentTitle: `Facture-${invoice.numero}` })
 
@@ -45,6 +54,50 @@ export function InvoiceEditor({ preloadedClient }: Props) {
 
   const handleClientChange = (client: Invoice['client']) => {
     updateInvoice({ client })
+  }
+
+  const handleAIExtracted = (result: ExtractionResult) => {
+    // Cancel any in-progress fill from a previous extraction
+    fillTimersRef.current.forEach(clearTimeout)
+    fillTimersRef.current = []
+
+    let delay = 0
+    const STEP = 80
+
+    // Merge only non-null AI client fields into current client (captured at call time)
+    const { contact, entreprise, adresse, email } = result.client
+    if (contact !== null || entreprise !== null || adresse !== null || email !== null) {
+      const existingClient = invoice.client
+      const t = setTimeout(() => {
+        updateInvoice({
+          client: {
+            contact: contact ?? existingClient?.contact ?? '',
+            entreprise: entreprise ?? existingClient?.entreprise ?? '',
+            adresse: adresse ?? existingClient?.adresse ?? '',
+            email: email ?? existingClient?.email ?? '',
+          },
+        })
+      }, delay)
+      fillTimersRef.current.push(t)
+      delay += STEP
+    }
+
+    // Append extracted lines progressively
+    result.lignes.forEach((ligne) => {
+      const t = setTimeout(() => {
+        const line: InvoiceLine = {
+          id: crypto.randomUUID(),
+          designation: ligne.designation,
+          periode: '',
+          frequence: ligne.frequence,
+          quantite: ligne.quantite,
+          prixUnitaire: ligne.prixUnitaire,
+        }
+        addLineFrom(line)
+      }, delay)
+      fillTimersRef.current.push(t)
+      delay += STEP
+    })
   }
 
   return (
@@ -62,6 +115,9 @@ export function InvoiceEditor({ preloadedClient }: Props) {
             Télécharger PDF
           </Button>
         </div>
+
+        {/* Barre d'assistance IA */}
+        <AIAssistantBar onExtracted={handleAIExtracted} />
 
         {/* Sections scrollables */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
