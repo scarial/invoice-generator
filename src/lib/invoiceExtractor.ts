@@ -73,20 +73,41 @@ function extractJsonObject(raw: string): string {
 
 export type ChatMessage = { role: 'user' | 'model'; text: string }
 
+export class ApiKeyInvalidError extends Error {
+  constructor() { super('Clé API invalide ou révoquée. Vérifiez votre clé dans les paramètres.') }
+}
+
+export class ApiKeyMissingError extends Error {
+  constructor() { super('Aucune clé API configurée.') }
+}
+
+function mapGoogleError(err: unknown): never {
+  const msg = err instanceof Error ? err.message : String(err)
+  if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid') || msg.includes('401') || msg.includes('403')) {
+    throw new ApiKeyInvalidError()
+  }
+  if (msg.includes('quota') || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
+    throw new Error('Quota API dépassé. Attendez quelques minutes avant de réessayer.')
+  }
+  if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed to fetch')) {
+    throw new Error('Impossible de contacter l\'API Google. Vérifiez votre connexion internet.')
+  }
+  throw new Error(`Erreur de l'API Google AI : ${msg}`)
+}
+
 export async function extractInvoiceFromText(
   text: string,
   history: ChatMessage[] = [],
+  apiKey?: string,
 ): Promise<{ result: ExtractionResult; updatedHistory: ChatMessage[] }> {
-  const apiKey = import.meta.env.VITE_GOOGLE_AI_KEY
-  if (!apiKey || apiKey === 'your_google_ai_api_key_here') {
-    throw new Error('Clé API Google AI manquante. Ajoutez VITE_GOOGLE_AI_KEY dans .env.local')
-  }
+  const key = apiKey || import.meta.env.VITE_GOOGLE_AI_KEY
+  if (!key) throw new ApiKeyMissingError()
 
   const capped = text.slice(0, MAX_INPUT_LENGTH)
   // Garde uniquement les 4 derniers échanges pour réduire la latence
   const trimmedHistory = history.slice(-4)
   const model = import.meta.env.VITE_AI_MODEL || 'gemini-2.0-flash-lite'
-  const genAI = new GoogleGenerativeAI(apiKey)
+  const genAI = new GoogleGenerativeAI(key)
   const generativeModel = genAI.getGenerativeModel({
     model,
     systemInstruction: SYSTEM_PROMPT,
@@ -96,9 +117,15 @@ export async function extractInvoiceFromText(
     history: trimmedHistory.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
   })
 
-  const chatResult = await chat.sendMessage(capped)
-  const raw = chatResult.response.text().trim()
-  const json = extractJsonObject(raw)
+  let raw: string
+  try {
+    const chatResult = await chat.sendMessage(capped)
+    raw = chatResult.response.text().trim()
+  } catch (err) {
+    mapGoogleError(err)
+  }
+
+  const json = extractJsonObject(raw!)
 
   let parsed: unknown
   try {

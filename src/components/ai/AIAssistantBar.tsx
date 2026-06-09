@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import { Mic, MicOff, ChevronDown, Send, Sparkles, RotateCcw } from 'lucide-react'
-import { extractInvoiceFromText, type ExtractionResult, type ChatMessage } from '../../lib/invoiceExtractor'
+import { Mic, MicOff, ChevronDown, Send, Sparkles, RotateCcw, Settings } from 'lucide-react'
+import { extractInvoiceFromText, ApiKeyInvalidError, ApiKeyMissingError, type ExtractionResult, type ChatMessage } from '../../lib/invoiceExtractor'
+import { useApiKey } from '../../hooks/useApiKey'
+import { ApiKeyModal } from './ApiKeyModal'
 import './AIAssistantBar.css'
 
 interface Props {
@@ -38,6 +40,10 @@ const SpeechRecognitionAPI =
     : undefined
 
 export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
+  const { apiKey, saveApiKey, clearApiKey, hasKey } = useApiKey()
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false)
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null)
+
   const [expanded, setExpanded] = useState(false)
   const [text, setText] = useState('')
   const [transcript, setTranscript] = useState('')
@@ -126,13 +132,18 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
     const input = text.trim()
     if (!input || processing) return
 
+    if (!hasKey) {
+      setShowApiKeyModal(true)
+      return
+    }
+
     setProcessing(true)
     setError(null)
     setWarnings([])
     setPendingResult(null)
 
     try {
-      const { result, updatedHistory } = await extractInvoiceFromText(input, chatHistory)
+      const { result, updatedHistory } = await extractInvoiceFromText(input, chatHistory, apiKey)
 
       if (result.confidence === 'low') {
         setPendingResult(result)
@@ -155,10 +166,24 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
       setText('')
       setTranscript('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erreur inconnue')
+      if (err instanceof ApiKeyMissingError) {
+        setShowApiKeyModal(true)
+      } else if (err instanceof ApiKeyInvalidError) {
+        clearApiKey()
+        setApiKeyError('Clé API refusée par Google. Vérifiez qu\'elle est correcte et active.')
+        setShowApiKeyModal(true)
+      } else {
+        setError(err instanceof Error ? err.message : 'Erreur inconnue')
+      }
     } finally {
       setProcessing(false)
     }
+  }
+
+  const handleApiKeySave = (key: string) => {
+    setApiKeyError(null)
+    saveApiKey(key)
+    setShowApiKeyModal(false)
   }
 
   const handleConfirmLow = () => {
@@ -203,14 +228,29 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
   const visibleMessages = historyExpanded ? userMessages : userMessages.slice(-1)
 
   return (
+    <>
+      {showApiKeyModal && (
+        <ApiKeyModal onSave={handleApiKeySave} error={apiKeyError} />
+      )}
     <div className={`ai-bar ${expanded ? 'ai-bar--expanded' : 'ai-bar--collapsed'}`}>
       <button className="ai-bar__header" onClick={() => setExpanded(v => !v)} type="button">
         <Sparkles size={13} color="#94a3b8" />
         <span className="ai-bar__label">
           Assistant IA
+          {!hasKey && <span className="ai-bar__no-key">— clé API manquante</span>}
           {hasHistory && <span className="ai-bar__count">{userMessages.length}</span>}
         </span>
         {processing && <div className="ai-bar__spinner" />}
+        {hasKey && (
+          <button
+            className="ai-bar__settings"
+            onClick={e => { e.stopPropagation(); setApiKeyError(null); setShowApiKeyModal(true) }}
+            title="Modifier la clé API"
+            type="button"
+          >
+            <Settings size={12} color="#94a3b8" />
+          </button>
+        )}
         <ChevronDown
           size={14}
           className={`ai-bar__chevron ${expanded ? 'ai-bar__chevron--open' : ''}`}
@@ -301,6 +341,19 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
             <div className="ai-bar__transcript">{transcript}</div>
           )}
 
+          {!hasKey && (
+            <div className="ai-bar__no-key-banner">
+              Aucune clé API configurée.{' '}
+              <button
+                className="ai-bar__no-key-action"
+                type="button"
+                onClick={() => { setApiKeyError(null); setShowApiKeyModal(true) }}
+              >
+                Configurer maintenant
+              </button>
+            </div>
+          )}
+
           {error && <div className="ai-bar__error">{error}</div>}
 
           {warnings.length > 0 && (
@@ -318,5 +371,6 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
         </div>
       )}
     </div>
+    </>
   )
 }
