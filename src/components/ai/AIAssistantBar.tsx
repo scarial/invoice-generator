@@ -337,7 +337,7 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
             )}
           </div>
 
-          {transcript && !text && (
+          {listening && transcript && (
             <div className="ai-bar__transcript">{transcript}</div>
           )}
 
