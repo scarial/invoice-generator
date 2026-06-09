@@ -85,6 +85,7 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
     if (!SpeechRecognitionAPI) return
     setTranscript('')
     setError(null)
+    setExpanded(true)
 
     const recognition = new SpeechRecognitionAPI()
     recognition.lang = 'fr-FR'
@@ -108,8 +109,19 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
       }
     }
     recognition.onerror = (e: Event & { error?: string }) => {
-      if ((e as { error?: string }).error === 'aborted') return
+      const code = (e as { error?: string }).error
+      if (code === 'aborted') return
       setListening(false)
+      recognitionRef.current = null
+      if (code === 'not-allowed') {
+        setError('Accès au microphone refusé. Autorisez le micro dans les paramètres de votre navigateur.')
+      } else if (code === 'no-speech') {
+        setError('Aucune voix détectée. Vérifiez votre microphone et réessayez.')
+      } else if (code === 'network') {
+        setError('Erreur réseau lors de la reconnaissance vocale. Vérifiez votre connexion.')
+      } else {
+        setError(`Erreur de reconnaissance vocale : ${code ?? 'inconnue'}`)
+      }
     }
 
     recognitionRef.current = recognition
