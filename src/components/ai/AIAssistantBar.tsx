@@ -144,11 +144,6 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
     const input = text.trim()
     if (!input || processing) return
 
-    if (!hasKey) {
-      setShowApiKeyModal(true)
-      return
-    }
-
     setProcessing(true)
     setError(null)
     setWarnings([])
