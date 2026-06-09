@@ -91,8 +91,8 @@ export const InvoicePreview = forwardRef<HTMLDivElement, Props>(({ invoice, user
                 <div className="text-slate-400 capitalize">{ligne.frequence}</div>
               </td>
               <td className="py-2 px-3 text-center text-slate-700">{ligne.quantite}</td>
-              <td className="py-2 px-3 text-right text-slate-700">{formatCurrency(ligne.prixUnitaire)}</td>
-              <td className="py-2 px-3 text-right font-medium text-slate-800">{formatCurrency(ligne.quantite * ligne.prixUnitaire)}</td>
+              <td className="py-2 px-3 text-right text-slate-700">{ligne.prixUnitaire !== null ? formatCurrency(ligne.prixUnitaire) : '—'}</td>
+              <td className="py-2 px-3 text-right font-medium text-slate-800">{ligne.prixUnitaire !== null ? formatCurrency(ligne.quantite * ligne.prixUnitaire) : '—'}</td>
             </tr>
           ))}
           {invoice.lignes.length === 0 && (

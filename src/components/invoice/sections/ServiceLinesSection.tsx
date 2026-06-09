@@ -92,7 +92,7 @@ export function ServiceLinesSection({ lignes, onAdd, onUpdate, onRemove }: Props
             </div>
 
             <div className="text-right text-xs font-medium text-slate-600">
-              Total : {formatCurrency(ligne.quantite * ligne.prixUnitaire)}
+              Total : {ligne.prixUnitaire !== null ? formatCurrency(ligne.quantite * ligne.prixUnitaire) : '—'}
             </div>
           </div>
         ))}

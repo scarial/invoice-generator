@@ -14,7 +14,7 @@ const ExtractionSchema = z.object({
     z.object({
       designation: z.string().max(500),
       quantite: z.number().finite().nonnegative().max(10000),
-      prixUnitaire: z.number().finite().nonnegative().max(1_000_000),
+      prixUnitaire: z.number().finite().nonnegative().max(1_000_000).nullable(),
       frequence: z.enum(['mensuel', 'annuel', 'unique']),
     })
   ).max(50),
@@ -25,11 +25,14 @@ const ExtractionSchema = z.object({
 
 export type ExtractionResult = z.infer<typeof ExtractionSchema>
 
-const SYSTEM_PROMPT = `Tu es un assistant de facturation. À partir d'une dictée vocale ou d'un message texte en français, tu extrais les informations d'une facture et tu retournes un objet JSON strict.
+const SYSTEM_PROMPT = `Tu es un assistant de facturation. À partir d'une dictée vocale ou d'un message texte en français, tu retournes l'état COMPLET et FINAL de la facture en JSON strict.
 
 Règles absolues :
 - Retourne UNIQUEMENT le JSON, aucun texte autour.
-- Si une information est absente, utilise null (jamais une chaîne vide ou une valeur inventée).
+- Tu retournes TOUJOURS l'intégralité de la facture (toutes les lignes, tous les champs), pas seulement ce qui change.
+- Applique uniquement les modifications explicitement demandées dans le dernier message. Ne réinterprète pas les messages précédents.
+- L'historique de conversation sert uniquement à connaître l'état actuel de la facture — ne rejoue jamais les actions passées.
+- Si une information est absente ou non modifiée, conserve la valeur existante (ou null si jamais renseignée).
 - Pour les montants : convertis toujours les mots en chiffres ("dix mille" → 10000, "cinq cents" → 500).
 - Pour la TVA : si non précisée, utilise null (ne suppose pas 20%).
 - Pour les lignes : chaque prestation distincte = une ligne séparée.
@@ -49,7 +52,7 @@ Schema de sortie :
     {
       "designation": string,
       "quantite": number,
-      "prixUnitaire": number,
+      "prixUnitaire": number | null,
       "frequence": "mensuel" | "annuel" | "unique"
     }
   ],
@@ -68,22 +71,33 @@ function extractJsonObject(raw: string): string {
   return raw.slice(start, end + 1)
 }
 
-export async function extractInvoiceFromText(text: string): Promise<ExtractionResult> {
+export type ChatMessage = { role: 'user' | 'model'; text: string }
+
+export async function extractInvoiceFromText(
+  text: string,
+  history: ChatMessage[] = [],
+): Promise<{ result: ExtractionResult; updatedHistory: ChatMessage[] }> {
   const apiKey = import.meta.env.VITE_GOOGLE_AI_KEY
   if (!apiKey || apiKey === 'your_google_ai_api_key_here') {
     throw new Error('Clé API Google AI manquante. Ajoutez VITE_GOOGLE_AI_KEY dans .env.local')
   }
 
   const capped = text.slice(0, MAX_INPUT_LENGTH)
-  const model = import.meta.env.VITE_AI_MODEL || 'gemini-2.0-flash-exp'
+  // Garde uniquement les 4 derniers échanges pour réduire la latence
+  const trimmedHistory = history.slice(-4)
+  const model = import.meta.env.VITE_AI_MODEL || 'gemini-2.0-flash-lite'
   const genAI = new GoogleGenerativeAI(apiKey)
   const generativeModel = genAI.getGenerativeModel({
     model,
     systemInstruction: SYSTEM_PROMPT,
   })
 
-  const result = await generativeModel.generateContent(capped)
-  const raw = result.response.text().trim()
+  const chat = generativeModel.startChat({
+    history: trimmedHistory.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
+  })
+
+  const chatResult = await chat.sendMessage(capped)
+  const raw = chatResult.response.text().trim()
   const json = extractJsonObject(raw)
 
   let parsed: unknown
@@ -93,5 +107,21 @@ export async function extractInvoiceFromText(text: string): Promise<ExtractionRe
     throw new Error("L'IA n'a pas retourné un JSON valide. Réessayez en reformulant.")
   }
 
-  return ExtractionSchema.parse(parsed)
+  const extraction = ExtractionSchema.parse(parsed)
+
+  // Ajoute un warning pour chaque ligne sans prix
+  const missingPrices = extraction.lignes
+    .filter(l => l.prixUnitaire === null)
+    .map(l => `Prix unitaire manquant pour "${l.designation}" — à compléter manuellement.`)
+  if (missingPrices.length > 0) {
+    extraction.warnings = [...extraction.warnings, ...missingPrices]
+    extraction.confidence = 'low'
+  }
+
+  const updatedHistory: ChatMessage[] = [
+    ...history,
+    { role: 'user', text: capped },
+    { role: 'model', text: raw },
+  ]
+  return { result: extraction, updatedHistory }
 }

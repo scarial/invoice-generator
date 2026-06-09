@@ -27,7 +27,7 @@ export interface InvoiceLine {
   periode: string
   frequence: Frequence
   quantite: number
-  prixUnitaire: number
+  prixUnitaire: number | null
 }
 
 export interface Invoice {

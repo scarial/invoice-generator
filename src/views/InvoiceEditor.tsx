@@ -82,22 +82,22 @@ export function InvoiceEditor({ preloadedClient }: Props) {
       delay += STEP
     }
 
-    // Append extracted lines progressively
-    result.lignes.forEach((ligne) => {
+    // Replace all lines with the AI's complete invoice state
+    if (result.lignes.length > 0) {
+      const newLines: InvoiceLine[] = result.lignes.map((ligne) => ({
+        id: crypto.randomUUID(),
+        designation: ligne.designation,
+        periode: '',
+        frequence: ligne.frequence,
+        quantite: ligne.quantite,
+        prixUnitaire: ligne.prixUnitaire,
+      }))
       const t = setTimeout(() => {
-        const line: InvoiceLine = {
-          id: crypto.randomUUID(),
-          designation: ligne.designation,
-          periode: '',
-          frequence: ligne.frequence,
-          quantite: ligne.quantite,
-          prixUnitaire: ligne.prixUnitaire,
-        }
-        addLineFrom(line)
+        updateInvoice({ lignes: newLines })
       }, delay)
       fillTimersRef.current.push(t)
       delay += STEP
-    })
+    }
   }
 
   return (
@@ -117,7 +117,7 @@ export function InvoiceEditor({ preloadedClient }: Props) {
         </div>
 
         {/* Barre d'assistance IA */}
-        <AIAssistantBar onExtracted={handleAIExtracted} />
+        <AIAssistantBar onExtracted={handleAIExtracted} invoiceKey={invoice.numero} />
 
         {/* Sections scrollables */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">

@@ -82,7 +82,7 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
 
     const recognition = new SpeechRecognitionAPI()
     recognition.lang = 'fr-FR'
-    recognition.continuous = false
+    recognition.continuous = true
     recognition.interimResults = true
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
@@ -95,8 +95,16 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
       }
     }
 
-    recognition.onend = () => setListening(false)
-    recognition.onerror = () => setListening(false)
+    // En mode continu, le browser peut couper après un silence — on redémarre tant que l'utilisateur n'a pas cliqué sur stop
+    recognition.onend = () => {
+      if (recognitionRef.current === recognition) {
+        try { recognition.start() } catch { setListening(false) }
+      }
+    }
+    recognition.onerror = (e: Event & { error?: string }) => {
+      if ((e as { error?: string }).error === 'aborted') return
+      setListening(false)
+    }
 
     recognitionRef.current = recognition
     recognition.start()
@@ -104,7 +112,9 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
   }
 
   const stopListening = () => {
-    recognitionRef.current?.stop()
+    const rec = recognitionRef.current
+    recognitionRef.current = null
+    rec?.stop()
     setListening(false)
     setTranscript(t => {
       setText(prev => prev || t)
@@ -176,9 +186,21 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
     setTranscript('')
   }
 
+  const [historyExpanded, setHistoryExpanded] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [text])
+
   const hasPending = pendingResult !== null
   const userMessages = chatHistory.filter(m => m.role === 'user')
   const hasHistory = userMessages.length > 0
+  const visibleMessages = historyExpanded ? userMessages : userMessages.slice(-1)
 
   return (
     <div className={`ai-bar ${expanded ? 'ai-bar--expanded' : 'ai-bar--collapsed'}`}>
@@ -199,7 +221,18 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
         <div className="ai-bar__body">
           {hasHistory && (
             <div className="ai-bar__history">
-              {userMessages.map((msg, i) => (
+              {userMessages.length > 1 && (
+                <button
+                  className="ai-bar__history-toggle"
+                  onClick={() => setHistoryExpanded(v => !v)}
+                  type="button"
+                >
+                  {historyExpanded
+                    ? 'Réduire l\'historique'
+                    : `Voir les ${userMessages.length - 1} message${userMessages.length > 2 ? 's' : ''} précédent${userMessages.length > 2 ? 's' : ''}`}
+                </button>
+              )}
+              {visibleMessages.map((msg, i) => (
                 <div key={i} className="ai-bar__bubble">
                   <span className="ai-bar__bubble-text">{msg.text}</span>
                   <span className="ai-bar__bubble-check">✓</span>
@@ -231,10 +264,12 @@ export function AIAssistantBar({ onExtracted, invoiceKey }: Props) {
                 <MicOff size={14} color="#cbd5e1" />
               </div>
             )}
-            <input
+            <textarea
+              ref={textareaRef}
               className="ai-bar__input"
               placeholder={hasHistory ? 'Précisez ou ajoutez…' : 'Décrivez la facture en langage naturel…'}
               value={text}
+              rows={1}
               onChange={e => {
                 setText(e.target.value)
                 if (pendingResult) setPendingResult(null)
